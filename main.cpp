@@ -262,7 +262,7 @@ int main() {
                             sf::Vector2f(500.f, 1115.f)
                         );
     CheckBox pausedCheckBox(isPaused,
-                            sf::Vector2f(100.0f, 50.0f),
+                            sf::Vector2f(50.0f, 50.0f),
                             50.0f,
                             sf::Color(100, 100, 100, 200),
                             sf::Color(255, 255, 255, 200),
@@ -271,7 +271,7 @@ int main() {
                             20
                         );
     CheckBox grabModeCheckBox(doGrabCarefully,
-                              sf::Vector2f(100.0f, 120.0f),
+                              sf::Vector2f(50.0f, 120.0f),
                               50.0f,
                               sf::Color(100, 100, 100, 200),
                               sf::Color(255, 255, 255, 200),
@@ -321,8 +321,7 @@ int main() {
                             "simulation speed",
                             20
                         );
-    Text text1(font, "'E': Spawn object", sf::Vector2f(50.0f, 600.f), 20, sf::Color::White);
-    Text text2(font, "'['/']': Zoom in/out", sf::Vector2f(50.0f, 630.f), 20, sf::Color::White);
+    Text text1(font, "'E': Spawn object\n'R': Delete all objects\n'[' / ']': Zoom in/out\n'W', 'A', 'S', 'D': Move the camera", sf::Vector2f(50.0f, 600.f), 20, sf::Color::White);
 
     sf::Vector2f mousePosition;
 
@@ -343,9 +342,14 @@ int main() {
                 pausedCheckBox.CheckIfPressed(window);
                 grabModeCheckBox.CheckIfPressed(window);
             }
-            if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::E) {
-                Vector2 mouseWorld = pixelToWorld(sf::Vector2f(sf::Mouse::getPosition(window)), cameraPos, screenWidth, screenHeight, worldWidth);
-                SpawnGravityObject(gravityObjects, mouseWorld, Vector2(0.0, 0.0), 1.f);
+            if (event.type == sf::Event::KeyPressed) {
+                if (event.key.code == sf::Keyboard::E) {
+                    Vector2 mouseWorld = pixelToWorld(sf::Vector2f(sf::Mouse::getPosition(window)), cameraPos, screenWidth, screenHeight, worldWidth);
+                    SpawnGravityObject(gravityObjects, mouseWorld, Vector2(0.0, 0.0), 1.f);
+                }
+                if (event.key.code == sf::Keyboard::R) {
+                    gravityObjects.clear();
+                }
             }
             grabRadiusSlider.HandleEvent(event, window);
             GSlider.HandleEvent(event, window);
@@ -397,7 +401,6 @@ int main() {
             GSlider.Draw(window);
             speedSlider.Draw(window);
             text1.Draw(window);
-            text2.Draw(window);
         }
         if (!doGrabCarefully) {
             grabRadiusCircle.setRadius(worldToScreenLength(grabRadius, screenWidth, 20.f));
