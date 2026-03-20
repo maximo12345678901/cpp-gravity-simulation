@@ -31,8 +31,8 @@ std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
 // Camera variables
 Vector2 cameraPos(Vector2(0.0, 0.0));
-float moveSpeed = 0.1f;
-float zoomSpeed = 0.2f;
+float moveSpeed = 0.005f;
+float zoomSpeed = 0.010f;
 
 // Forward declare
 struct QuadTree;
@@ -265,12 +265,12 @@ int main() {
             }
         }
 
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) cameraPos.x -= moveSpeed;
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) cameraPos.x += moveSpeed;
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::S)) cameraPos.y -= moveSpeed;
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::W)) cameraPos.y += moveSpeed;
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::LBracket)) worldWidth -= zoomSpeed;
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::RBracket)) worldWidth += zoomSpeed;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) cameraPos.x -= moveSpeed*worldWidth;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) cameraPos.x += moveSpeed*worldWidth;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::S)) cameraPos.y -= moveSpeed*worldWidth;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::W)) cameraPos.y += moveSpeed*worldWidth;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::LBracket)) worldWidth -= zoomSpeed*worldWidth;
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::RBracket)) worldWidth += zoomSpeed*worldWidth;
 
         window.clear();
 
