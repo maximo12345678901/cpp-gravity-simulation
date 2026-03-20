@@ -18,13 +18,14 @@ static float worldWidth = 20.0f;
 sf::RenderWindow window(sf::VideoMode(screenWidth, screenHeight), "gravit simulaton");
 
 // Simulation parameters
-const float G       = 6.674e-10f;
+double G       = 6.674;
 const float epsilon = 0.1f;
 double pullingStrength = 100.0;
 bool isPaused = false;
 bool isShowingUI = true;
-bool doGrabCarefully = true;
+bool doGrabCarefully = false;
 double grabRadius = 3.0;
+double simulationSpeed = 1.0;
 
 // Random number
 std::random_device rd;
@@ -198,7 +199,7 @@ void GravityObject::UpdateRK4(float dt, const QuadTree& tree, float theta) {
 static std::vector<GravityObject> gravityObjects;
 
 void SpawnGravityObject(std::vector<GravityObject>& gravityObjects, Vector2 pos, Vector2 vel, float mass) {
-    float radius = std::cbrt(mass) * 0.0001f;
+    float radius = std::cbrt(mass) * 0.2f;
     gravityObjects.emplace_back(pos, vel, mass, radius);
 }
 
@@ -256,14 +257,76 @@ int main() {
     sf::CircleShape grabRadiusCircle(0, 60);
     grabRadiusCircle.setFillColor(sf::Color(255, 255, 255, 30));
     // UI elements
-    Background uiBackground(sf::Color(100, 100, 100, 100), sf::Vector2f(10.f, 10.f), sf::Vector2f(1000.f, 1115.f));
-    CheckBox pausedCheckBox(isPaused, sf::Vector2f(50.0f, 50.0f), 50.0f, sf::Color(100, 100, 100, 200), sf::Color(255, 255, 255, 200));
-    CheckBox grabModeCheckBox(doGrabCarefully, sf::Vector2f(150.0f, 50.0f), 50.0f, sf::Color(100, 100, 100, 200), sf::Color(255, 255, 255, 200));
-    Slider grabRadiusSlider(grabRadius, 0.01, 10.0, sf::Vector2f(50.0f, 150.0f), 400.0f, font);
+    Background uiBackground(sf::Color(100, 100, 100, 100),
+                            sf::Vector2f(10.f, 10.f),
+                            sf::Vector2f(500.f, 1115.f)
+                        );
+    CheckBox pausedCheckBox(isPaused,
+                            sf::Vector2f(100.0f, 50.0f),
+                            50.0f,
+                            sf::Color(100, 100, 100, 200),
+                            sf::Color(255, 255, 255, 200),
+                            font,
+                            "paused",
+                            20
+                        );
+    CheckBox grabModeCheckBox(doGrabCarefully,
+                              sf::Vector2f(100.0f, 120.0f),
+                              50.0f,
+                              sf::Color(100, 100, 100, 200),
+                              sf::Color(255, 255, 255, 200),
+                              font,
+                              "precise grabbing",
+                              20
+                          );
+    Slider grabRadiusSlider(grabRadius,
+                            0.1,
+                            10.0,
+                            sf::Vector2f(50.0f, 250.0f),
+                            400.0f,
+                            sf::Color(100, 100, 100, 255),
+                            sf::Color::White,
+                            5.f,
+                            10.f,
+                            2,
+                            font,
+                            "grabbing radius",
+                            20
+                        );
+    Slider GSlider(G,
+                            -20.0,
+                            40.0,
+                            sf::Vector2f(50.0f, 400.0f),
+                            400.0f,
+                            sf::Color(100, 100, 100, 255),
+                            sf::Color::White,
+                            5.f,
+                            10.f,
+                            2,
+                            font,
+                            "gravitational constant",
+                            20
+                        );
+    Slider speedSlider(simulationSpeed,
+                            0.0,
+                            1.0,
+                            sf::Vector2f(50.0f, 550.0f),
+                            400.0f,
+                            sf::Color(100, 100, 100, 255),
+                            sf::Color::White,
+                            5.f,
+                            10.f,
+                            2,
+                            font,
+                            "simulation speed",
+                            20
+                        );
+    Text text1(font, "'E': Spawn object", sf::Vector2f(50.0f, 600.f), 20, sf::Color::White);
+    Text text2(font, "'['/']': Zoom in/out", sf::Vector2f(50.0f, 630.f), 20, sf::Color::White);
 
     sf::Vector2f mousePosition;
 
-    SpawnRandom(gravityObjects, 20, -8.0f, 8.0f, 2.0f, 1e9f, 1e11f);
+    SpawnRandom(gravityObjects, 20, -8.0f, 8.0f, 2.0f, 0.1f, 10.f);
     while (window.isOpen()) {
         sf::Event event;
         while (window.pollEvent(event)) {
@@ -282,9 +345,11 @@ int main() {
             }
             if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::E) {
                 Vector2 mouseWorld = pixelToWorld(sf::Vector2f(sf::Mouse::getPosition(window)), cameraPos, screenWidth, screenHeight, worldWidth);
-                SpawnGravityObject(gravityObjects, mouseWorld, Vector2(0.0, 0.0), 1e10f);
+                SpawnGravityObject(gravityObjects, mouseWorld, Vector2(0.0, 0.0), 1.f);
             }
             grabRadiusSlider.HandleEvent(event, window);
+            GSlider.HandleEvent(event, window);
+            speedSlider.HandleEvent(event, window);
         }
 
         mousePosition.x = (float)sf::Mouse::getPosition(window).x;
@@ -310,8 +375,8 @@ int main() {
 
             #pragma omp parallel for schedule(dynamic)
             for (int i = 0; i < (int)gravityObjects.size(); ++i)
-                gravityObjects[i].UpdateRK4(0.001f, tree, 0.5f);
-            for (int iter = 0; iter < 3; ++iter)
+                gravityObjects[i].UpdateRK4(0.001f * simulationSpeed, tree, 0.5f);
+            for (int iter = 0; iter < 8; ++iter)
                 GravityObject::ResolveCollisions(gravityObjects);
         }
 
@@ -329,13 +394,18 @@ int main() {
             pausedCheckBox.Draw(window);
             grabModeCheckBox.Draw(window);
             grabRadiusSlider.Draw(window);
+            GSlider.Draw(window);
+            speedSlider.Draw(window);
+            text1.Draw(window);
+            text2.Draw(window);
         }
-        grabRadiusCircle.setRadius(worldToScreenLength(grabRadius, screenWidth, 20.f));
-        float radius = grabRadiusCircle.getRadius();
-        grabRadiusCircle.setOrigin(sf::Vector2f(radius, radius));
-        grabRadiusCircle.setPosition(mousePosition);
-        window.draw(grabRadiusCircle);
-
+        if (!doGrabCarefully) {
+            grabRadiusCircle.setRadius(worldToScreenLength(grabRadius, screenWidth, 20.f));
+            float radius = grabRadiusCircle.getRadius();
+            grabRadiusCircle.setOrigin(sf::Vector2f(radius, radius));
+            grabRadiusCircle.setPosition(mousePosition);
+            window.draw(grabRadiusCircle);
+        }
         window.display();
     }
     return 0;
