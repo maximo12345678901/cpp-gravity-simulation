@@ -21,8 +21,10 @@ sf::RenderWindow window(sf::VideoMode(screenWidth, screenHeight), "gravit simula
 const float G       = 6.674e-10f;
 const float epsilon = 0.1f;
 double pullingStrength = 100.0;
-static bool isPaused = false;
-static bool isShowingUI = true;
+bool isPaused = false;
+bool isShowingUI = true;
+bool doGrabCarefully = true;
+double grabRadius = 3.0;
 
 // Random number
 std::random_device rd;
@@ -213,21 +215,24 @@ void SpawnRandom(std::vector<GravityObject>& gravityObjects, int n, float bounda
     }
 }
 
-// UI elements
-Background uiBackground(sf::Color(100, 100, 100, 100), sf::Vector2f(10.f, 10.f), sf::Vector2f(1000.f, 1115.f));
-CheckBox pausedCheckBox(isPaused, sf::Vector2f(50.0f, 50.0f), 50.0f, sf::Color(100, 100, 100, 200), sf::Color(255, 255, 255, 200));
-
 void CheckToGrabObjects() {
     static bool wasPressed = false;
     bool isPressed = sf::Mouse::isButtonPressed(sf::Mouse::Left);
 
     if (isPressed && !wasPressed) {
-        for (GravityObject& gravityObj : gravityObjects) {
+        for (GravityObject& gravityObj : gravityObjects) {         
             sf::Vector2f mousePosition = sf::Vector2f(sf::Mouse::getPosition(window));
             sf::Vector2f difference = gravityObj.shape.getPosition() - mousePosition;
             float screenDistance = std::hypot(difference.x, difference.y);
-            if (screenDistance <= gravityObj.shape.getRadius()) {
-                gravityObj.isGrabbed = true;
+            if (doGrabCarefully) {
+                if (screenDistance <= gravityObj.shape.getRadius()) {
+                    gravityObj.isGrabbed = true;
+                }
+            }
+            else {
+                if (screenToWorldLength(screenDistance, screenWidth, 20.0f) <= grabRadius) {
+                    gravityObj.isGrabbed = true;
+                }
             }
         }
     }
@@ -242,6 +247,21 @@ void CheckToGrabObjects() {
 
 int main() {
     window.setFramerateLimit(60);
+
+    sf::Font font;
+    if (!font.loadFromFile("font.tff")) {
+        // handle error
+        return -1;
+    }
+    sf::CircleShape grabRadiusCircle(0, 60);
+    grabRadiusCircle.setFillColor(sf::Color(255, 255, 255, 30));
+    // UI elements
+    Background uiBackground(sf::Color(100, 100, 100, 100), sf::Vector2f(10.f, 10.f), sf::Vector2f(1000.f, 1115.f));
+    CheckBox pausedCheckBox(isPaused, sf::Vector2f(50.0f, 50.0f), 50.0f, sf::Color(100, 100, 100, 200), sf::Color(255, 255, 255, 200));
+    CheckBox grabModeCheckBox(doGrabCarefully, sf::Vector2f(150.0f, 50.0f), 50.0f, sf::Color(100, 100, 100, 200), sf::Color(255, 255, 255, 200));
+    Slider grabRadiusSlider(grabRadius, 0.01, 10.0, sf::Vector2f(50.0f, 150.0f), 400.0f, font);
+
+    sf::Vector2f mousePosition;
 
     SpawnRandom(gravityObjects, 20, -8.0f, 8.0f, 2.0f, 1e9f, 1e11f);
     while (window.isOpen()) {
@@ -258,12 +278,17 @@ int main() {
             }
             if (event.type == sf::Event::MouseButtonPressed) {
                 pausedCheckBox.CheckIfPressed(window);
+                grabModeCheckBox.CheckIfPressed(window);
             }
             if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::E) {
                 Vector2 mouseWorld = pixelToWorld(sf::Vector2f(sf::Mouse::getPosition(window)), cameraPos, screenWidth, screenHeight, worldWidth);
                 SpawnGravityObject(gravityObjects, mouseWorld, Vector2(0.0, 0.0), 1e10f);
             }
+            grabRadiusSlider.HandleEvent(event, window);
         }
+
+        mousePosition.x = (float)sf::Mouse::getPosition(window).x;
+        mousePosition.y = (float)sf::Mouse::getPosition(window).y;
 
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::A)) cameraPos.x -= moveSpeed*worldWidth;
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::D)) cameraPos.x += moveSpeed*worldWidth;
@@ -290,13 +315,26 @@ int main() {
                 GravityObject::ResolveCollisions(gravityObjects);
         }
 
-        for (GravityObject& obj : gravityObjects)
+        for (GravityObject& obj : gravityObjects) {
             obj.Draw(window, cameraPos);
-
+            if (obj.isGrabbed) {
+                obj.shape.setFillColor(sf::Color::Red);
+            }
+            else {
+                obj.shape.setFillColor(sf::Color::White);
+            }
+        }
         if (isShowingUI) {
             uiBackground.Draw(window);
             pausedCheckBox.Draw(window);
+            grabModeCheckBox.Draw(window);
+            grabRadiusSlider.Draw(window);
         }
+        grabRadiusCircle.setRadius(worldToScreenLength(grabRadius, screenWidth, 20.f));
+        float radius = grabRadiusCircle.getRadius();
+        grabRadiusCircle.setOrigin(sf::Vector2f(radius, radius));
+        grabRadiusCircle.setPosition(mousePosition);
+        window.draw(grabRadiusCircle);
 
         window.display();
     }
