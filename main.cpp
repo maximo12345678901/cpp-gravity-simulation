@@ -1,6 +1,6 @@
 #include <SFML/Graphics.hpp>
 #include <memory>
-#include <algorithm>
+#include <sstream>
 #include <cmath>
 #include <iostream>
 #include <omp.h>
@@ -11,14 +11,14 @@
 #include "SFML/Window/Keyboard.hpp"
 
 // global rendering parameters
-static int screenWidth = 2000;
-static int screenHeight = 1125;
 static float worldWidth = 20.0f;
 
-sf::RenderWindow window(sf::VideoMode(screenWidth, screenHeight), "gravit simulaton");
+sf::RenderWindow window(sf::VideoMode::getDesktopMode(), "gravit simulaton");
+static int screenWidth = window.getSize().x;
+static int screenHeight = window.getSize().y;
 
 // Simulation parameters
-double G       = 6.674;
+double G       = 40.0;
 const float epsilon = 0.1f;
 double pullingStrength = 100.0;
 bool isPaused = false;
@@ -144,49 +144,69 @@ struct QuadTree {
             if (child->contains(obj->position)) { child->insert(obj); break; }
     }
 
-    Vector2 computeAcceleration(const GravityObject* obj, float theta) const {
-        if (totalMass == 0.f) return {0.f, 0.f};
-        if (isLeaf() && body == obj) return {0.f, 0.f};
+    Vector2 computeAcceleration(Vector2 queryPos, float objRadius, float theta) const {
+    if (totalMass == 0.f) return {0.f, 0.f};
+
+    // Skip leaf nodes that are spatially coincident (approximate self-skip)
+    Vector2 delta = centerOfMass - queryPos;
+    float dist = Vector2::length(delta);
+
+    if (dist < objRadius) return {0.f, 0.f};
+
+    float ratio = (halfSize * 2.f) / dist;
+    if (isLeaf() || ratio < theta) {
+        float forceMag = (G * totalMass) / (dist * dist);
+        return delta / dist * forceMag;
+    }
+
+    Vector2 acc = {0.f, 0.f};
+    for (const auto* child : {nw.get(), ne.get(), sw.get(), se.get()})
+        if (child) acc += child->computeAcceleration(queryPos, objRadius, theta);
+    return acc;
+}
+    double computePotentialEnergy(const GravityObject* obj, float theta) const {
+        if (totalMass == 0.f) return 0.0;
+        if (isLeaf() && body == obj) return 0.0;
 
         Vector2 delta = centerOfMass - obj->position;
         float dist = Vector2::length(delta);
 
-        if (dist < obj->radius) return {0.f, 0.f};
+        if (dist < obj->radius) return 0.0;
 
         float ratio = (halfSize * 2.f) / dist;
         if (isLeaf() || ratio < theta) {
-            float forceMag = (G * totalMass) / (dist * dist);
-            return delta / dist * forceMag;
+            // Avoid double-counting: multiply by 0.5
+            return -0.5 * (G * obj->mass * totalMass) / dist;
         }
 
-        Vector2 acc = {0.f, 0.f};
+        double pe = 0.0;
         for (const auto* child : {nw.get(), ne.get(), sw.get(), se.get()})
-            if (child) acc += child->computeAcceleration(obj, theta);
-        return acc;
+            if (child) pe += child->computePotentialEnergy(obj, theta);
+        return pe;
     }
 };
 
 // UpdateRK4 defined out-of-line so both types are fully known
 void GravityObject::UpdateRK4(float dt, const QuadTree& tree, float theta) {
     if (!isGrabbed) {
-        auto computeAcceleration = [&](Vector2 pos) -> Vector2 {
-            return tree.computeAcceleration(this, theta);
+        auto accel = [&](Vector2 pos) -> Vector2 {
+            return tree.computeAcceleration(pos, radius, theta);
         };
 
-        Vector2 k1_vel = velocity;
-        Vector2 k1_acc = computeAcceleration(position);
+        Vector2 k1_v = velocity;
+        Vector2 k1_a = accel(position);
 
-        Vector2 k2_vel = velocity + k1_acc * (dt/2);
-        Vector2 k2_acc = computeAcceleration(position + k1_vel * (dt/2));
+        Vector2 k2_v = velocity + k1_a * (dt / 2);
+        Vector2 k2_a = accel(position + k1_v * (dt / 2));
 
-        Vector2 k3_vel = velocity + k2_acc * (dt/2);
-        Vector2 k3_acc = computeAcceleration(position + k2_vel * (dt/2));
+        Vector2 k3_v = velocity + k2_a * (dt / 2);
+        Vector2 k3_a = accel(position + k2_v * (dt / 2));
 
-        Vector2 k4_vel = velocity + k3_acc * dt;
-        Vector2 k4_acc = computeAcceleration(position + k3_vel * dt);
+        Vector2 k4_v = velocity + k3_a * dt;
+        Vector2 k4_a = accel(position + k3_v * dt);
 
-        position += (k1_vel + k2_vel * 2 + k3_vel * 2 + k4_vel) * (dt / 6.f);
-        velocity += (k1_acc + k2_acc * 2 + k3_acc * 2 + k4_acc) * (dt / 6.f);
+        position += (k1_v + k2_v * 2 + k3_v * 2 + k4_v) * (dt / 6.f);
+        velocity += (k1_a + k2_a * 2 + k3_a * 2 + k4_a) * (dt / 6.f);
     }
     else {
         Vector2 worldMousePosition = pixelToWorld(sf::Vector2f(sf::Mouse::getPosition(window)), cameraPos, screenWidth, screenHeight, worldWidth);
@@ -203,14 +223,32 @@ void SpawnGravityObject(std::vector<GravityObject>& gravityObjects, Vector2 pos,
     gravityObjects.emplace_back(pos, vel, mass, radius);
 }
 
-void SpawnRandom(std::vector<GravityObject>& gravityObjects, int n, float boundaryMin, float boundaryMax, float velocityMax, float massMin, float massMax) {
-    std::uniform_real_distribution<float> posDist(boundaryMin, boundaryMax);
-    std::uniform_real_distribution<float> velDist(-velocityMax, velocityMax);
+void SpawnGalaxy(std::vector<GravityObject>& gravityObjects, int n, float radius, float massMin, float massMax, Vector2 center = {0,0}, Vector2 bulkVelocity = {0,0}) {
+    // Central black hole
+    float blackHoleMass = 500.f;
+    SpawnGravityObject(gravityObjects, center, bulkVelocity, blackHoleMass);
+
+    std::uniform_real_distribution<float> angleDist(0.f, 2.f * M_PI);
+    // Exponential-ish disc: most stars close in, few far out
+    std::exponential_distribution<float> radDist(3.0f / radius);
     std::uniform_real_distribution<float> massDist(massMin, massMax);
+    std::normal_distribution<float> thicknessDist(0.f, radius * 0.04f); // slight vertical scatter
 
     for (int i = 0; i < n; ++i) {
-        Vector2 pos(posDist(gen), posDist(gen));
-        Vector2 vel(velDist(gen), velDist(gen));
+        float angle = angleDist(gen);
+        float r = std::min(radDist(gen), radius); // clamp outliers
+
+        Vector2 pos = center + Vector2(std::cos(angle) * r, std::sin(angle) * r);
+        pos.y += thicknessDist(gen); // small disc thickness
+
+        // Circular orbital speed around total central mass
+        float enclosedMass = blackHoleMass; // simplified: just BH dominates
+        float speed = std::sqrt((float)G * enclosedMass / (r + 0.1f));
+
+        // Tangent direction (perpendicular to radial, CCW)
+        Vector2 tangent(-std::sin(angle), std::cos(angle));
+        Vector2 vel = bulkVelocity + tangent * speed;
+
         float mass = massDist(gen);
         SpawnGravityObject(gravityObjects, pos, vel, mass);
     }
@@ -246,6 +284,37 @@ void CheckToGrabObjects() {
     wasPressed = isPressed;
 }
 
+void ApplySwirlForce(std::vector<GravityObject>& gravityObjects, Vector2 cursorWorld, double strength, double radius, float dt) {
+    for (GravityObject& obj : gravityObjects) {
+        Vector2 delta = obj.position - cursorWorld;
+        float dist = Vector2::length(delta);
+
+        if (dist > radius || dist < 0.0001f) continue;
+
+        Vector2 tangent(-delta.y, delta.x);
+        tangent = tangent / dist; // normalize
+
+        float falloff = std::sqrt((worldWidth / 10.0f) / (dist + epsilon));
+
+        obj.velocity += tangent * (float)(strength * falloff * dt);
+    }
+}
+
+double ComputeKineticEnergy(const std::vector<GravityObject>& objs) {
+    double ke = 0.0;
+    for (const auto& obj : objs) {
+        double v2 = obj.velocity.x * obj.velocity.x + obj.velocity.y * obj.velocity.y;
+        ke += 0.5 * obj.mass * v2;
+    }
+    return ke;
+}
+
+double ComputePotentialEnergy(const std::vector<GravityObject>& objs, const QuadTree& tree, float theta) {
+    double pe = 0.0;
+    for (const auto& obj : objs)
+        pe += tree.computePotentialEnergy(&obj, theta);
+    return pe;
+}
 int main() {
     window.setFramerateLimit(60);
 
@@ -259,7 +328,7 @@ int main() {
     // UI elements
     Background uiBackground(sf::Color(100, 100, 100, 100),
                             sf::Vector2f(10.f, 10.f),
-                            sf::Vector2f(500.f, 1115.f)
+                            sf::Vector2f(500.f, window.getSize().y - 10.f)
                         );
     CheckBox pausedCheckBox(isPaused,
                             sf::Vector2f(50.0f, 50.0f),
@@ -322,10 +391,13 @@ int main() {
                             20
                         );
     Text text1(font, "'E': Spawn object\n'R': Delete all objects\n'[' / ']': Zoom in/out\n'W', 'A', 'S', 'D': Move the camera", sf::Vector2f(50.0f, 600.f), 20, sf::Color::White);
-
+    std::ostringstream energyStream;
+    Text energyText(font, "", sf::Vector2f(50.0f, 800.f), 18, sf::Color::White);
     sf::Vector2f mousePosition;
 
-    SpawnRandom(gravityObjects, 20, -8.0f, 8.0f, 2.0f, 0.1f, 10.f);
+    SpawnGalaxy(gravityObjects, 400, 200.0f, 0.5f, 3.0f, Vector2(-150.0, 0.0), Vector2(90.0, 0.0));
+    SpawnGalaxy(gravityObjects, 400, 200.0f, 0.5f, 3.0f, Vector2(150.0, 0.0), Vector2(-90.0, 0.0));
+
     while (window.isOpen()) {
         sf::Event event;
         while (window.pollEvent(event)) {
@@ -350,6 +422,11 @@ int main() {
                 if (event.key.code == sf::Keyboard::R) {
                     gravityObjects.clear();
                 }
+                if (event.key.code == sf::Keyboard::T) {
+                    for (GravityObject& obj : gravityObjects) {
+                        obj.velocity = Vector2(0.0, 0.0);
+                    }
+                }
             }
             grabRadiusSlider.HandleEvent(event, window);
             GSlider.HandleEvent(event, window);
@@ -369,21 +446,28 @@ int main() {
         window.clear();
 
         CheckToGrabObjects();
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::U) && !isPaused) {
+            Vector2 cursorWorld = pixelToWorld(
+                sf::Vector2f(sf::Mouse::getPosition(window)),
+                cameraPos, screenWidth, screenHeight, worldWidth
+            );
+            ApplySwirlForce(gravityObjects, cursorWorld, 500.0, grabRadius * 3.0, 0.001f * simulationSpeed);
+        }
+        
+        QuadTree tree;
+        tree.center = {0.f, 0.f};
+        tree.halfSize = worldWidth * 4.f;
+        for (const auto& obj : gravityObjects)
+            tree.insert(&obj);
 
         if (!isPaused) {
-            QuadTree tree;
-            tree.center = {0.f, 0.f};
-            tree.halfSize = worldWidth * 4.f;
-            for (const auto& obj : gravityObjects)
-                tree.insert(&obj);
-
             #pragma omp parallel for schedule(dynamic)
             for (int i = 0; i < (int)gravityObjects.size(); ++i)
                 gravityObjects[i].UpdateRK4(0.001f * simulationSpeed, tree, 0.5f);
             for (int iter = 0; iter < 8; ++iter)
                 GravityObject::ResolveCollisions(gravityObjects);
         }
-
+      
         for (GravityObject& obj : gravityObjects) {
             obj.Draw(window, cameraPos);
             if (obj.isGrabbed) {
@@ -401,6 +485,19 @@ int main() {
             GSlider.Draw(window);
             speedSlider.Draw(window);
             text1.Draw(window);
+
+            double ke = ComputeKineticEnergy(gravityObjects);
+            double pe = ComputePotentialEnergy(gravityObjects, tree, 0.5f);
+            double total = ke + pe;
+
+            energyStream.str("");
+            energyStream << std::fixed << std::setprecision(3)
+                         << "KE:    " << ke    << "\n"
+                         << "PE:    " << pe    << "\n"
+                         << "Total: " << total << "\n";
+            energyText.SetString(energyStream.str());
+
+            energyText.Draw(window);
         }
         if (!doGrabCarefully) {
             grabRadiusCircle.setRadius(worldToScreenLength(grabRadius, screenWidth, 20.f));
