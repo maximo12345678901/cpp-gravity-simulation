@@ -414,7 +414,7 @@ int main() {
     sf::Vector2f mousePosition;
 
     // Start with a galaxy instead of random objects
-    SpawnGalaxy(gravityObjects, 1000, 200.0f, 0.5f, 2.0f);
+    SpawnGalaxy(gravityObjects, 10000, 1000.0f, 0.5f, 2.0f);
 
 
     while (window.isOpen()) {
