@@ -414,7 +414,7 @@ int main() {
     sf::Vector2f mousePosition;
 
     // Start with a galaxy instead of random objects
-    SpawnGalaxy(gravityObjects, 10000, 1000.0f, 0.5f, 2.0f);
+    SpawnGalaxy(gravityObjects, 700, 200.0f, 0.5f, 2.0f);
 
 
     while (window.isOpen()) {
@@ -490,6 +490,39 @@ int main() {
             gpu.step(gravityObjects, 0.001f * simulationSpeed, (float)G, epsilon);
             for (int iter = 0; iter < 8; ++iter)
                 GravityObject::ResolveCollisions(gravityObjects);
+
+            float dt = 0.001f * simulationSpeed;
+            for (GravityObject& obj : gravityObjects) {
+                if (obj.isGrabbed) {
+                    if (sf::Keyboard::isKeyPressed(sf::Keyboard::Q)) {
+                        float dt = 0.001f * simulationSpeed;
+                        for (GravityObject& obj : gravityObjects) {
+                            if (obj.isGrabbed) {
+                                Vector2 worldMousePosition = pixelToWorld(
+                                    sf::Vector2f(sf::Mouse::getPosition(window)),
+                                    cameraPos, screenWidth, screenHeight, worldWidth
+                                );
+                                Vector2 difference = worldMousePosition - obj.position;
+                                obj.velocity = difference * pullingStrength;
+                            }
+                        }
+                    }
+                    if (sf::Keyboard::isKeyPressed(sf::Keyboard::B)) {
+                        float dt = 0.001f * simulationSpeed;
+                        for (GravityObject& obj : gravityObjects) {
+                            if (obj.isGrabbed) {
+                                Vector2 worldMousePosition = pixelToWorld(
+                                    sf::Vector2f(sf::Mouse::getPosition(window)),
+                                    cameraPos, screenWidth, screenHeight, worldWidth
+                                );
+                                Vector2 difference = worldMousePosition - obj.position;
+                                obj.velocity -= difference * pullingStrength;
+                            }
+                        }
+                    }
+                    obj.position += obj.velocity * dt;
+                }
+            }
         }
 
         for (GravityObject& obj : gravityObjects) {
